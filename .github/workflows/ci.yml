@@ -103,12 +103,12 @@ jobs:
 
       # Run Trivy from its official image instead of a third-party action.
       # 0.69.3 is a version the maintainers list as safe after the March 2026
-      # supply-chain incident; pin to an image digest once you have verified one.
+      # supply-chain incident, and the digest below pins that exact image.
       - name: Scan image with Trivy
         run: |
           docker run --rm \
             -v "$PWD:/work:ro" \
-            ghcr.io/aquasecurity/trivy:0.69.3 \
+            ghcr.io/aquasecurity/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
             image --input /work/image.tar \
             --severity HIGH,CRITICAL \
             --ignore-unfixed \
