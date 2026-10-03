@@ -68,3 +68,9 @@ def test_missing_todo_returns_404():
     assert client.get("/todos/999").status_code == 404
     assert client.patch("/todos/999", json={"completed": True}).status_code == 404
     assert client.delete("/todos/999").status_code == 404
+
+
+def test_index_serves_frontend():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]

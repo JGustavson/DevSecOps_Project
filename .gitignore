@@ -1,2 +1,3 @@
 .venv/
 image.tar
+__pycache__/

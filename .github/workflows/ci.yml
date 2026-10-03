@@ -113,3 +113,71 @@ jobs:
             --severity HIGH,CRITICAL \
             --ignore-unfixed \
             --exit-code 1
+
+  sast:
+    name: SAST (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      # Tests are excluded because Bandit flags every `assert` in them
+      - name: Scan source code
+        run: bandit -r . --exclude ./.venv,./test_main.py --severity-level medium
+
+  dast:
+    name: DAST (OWASP ZAP baseline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and start the app
+        run: |
+          docker build -t todo-api:ci .
+          docker run -d --name todo-api -p 8000:8000 todo-api:ci
+
+      - name: Wait for the app to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/todos > /dev/null; then
+              echo "App is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "App did not start in time"
+          docker logs todo-api
+          exit 1
+
+      - name: Prepare report directory
+        run: |
+          mkdir zap-wrk
+          chmod 777 zap-wrk
+
+      # Official ZAP image run directly instead of a third-party action.
+      # The baseline scan is passive (spider + passive rules), so it is safe to
+      # run on every push. -I keeps warnings from failing the build; see the
+      # report for findings. Pin this image to a digest once you have verified one.
+      - name: Run ZAP baseline scan
+        run: |
+          docker run --rm --network host \
+            -v "$PWD/zap-wrk:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://localhost:8000 -r report.html -I
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap-wrk/report.html
+
+      - name: Stop the app
+        if: always()
+        run: docker rm -f todo-api

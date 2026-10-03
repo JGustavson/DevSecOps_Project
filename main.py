@@ -1,7 +1,12 @@
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="To-Do API")
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 class TodoCreate(BaseModel):
@@ -29,6 +34,11 @@ def get_or_404(todo_id: int) -> Todo:
     if todo is None:
         raise HTTPException(status_code=404, detail="Todo not found")
     return todo
+
+
+@app.get("/", include_in_schema=False)
+def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/todos")
