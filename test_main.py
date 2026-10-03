@@ -1,16 +1,33 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from main import app, todos
+from main import Base, app, get_db
 
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def clear_todos():
-    todos.clear()
+def database():
+    """Give every test its own empty in-memory database."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, autoflush=False)
+
+    def override_get_db():
+        with testing_session() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
     yield
-    todos.clear()
+    app.dependency_overrides.clear()
+    engine.dispose()
 
 
 def create(title="Buy milk"):

@@ -2,7 +2,8 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    DATABASE_URL=sqlite:////data/todos.db
 
 WORKDIR /app
 
@@ -12,7 +13,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user
-RUN useradd --create-home --uid 10001 appuser
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir /data \
+    && chown appuser /data
 
 # Install dependencies first so this layer is cached until requirements change
 COPY requirements.txt .

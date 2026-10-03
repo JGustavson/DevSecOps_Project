@@ -12,3 +12,4 @@ test_main.py
 requirements-dev.txt
 Dockerfile
 .dockerignore
+*.db
