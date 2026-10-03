@@ -25,6 +25,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -37,16 +38,21 @@
     border-radius: 6px; padding: 0.35rem 0.7rem; font-size: 0.85rem; white-space: nowrap;
   }
   form { display: grid; gap: 0.5rem; margin-bottom: 1.75rem; }
-  input[type="text"] {
+  input[type="text"], input[type="password"] {
     font: inherit; color: inherit; background: var(--surface);
     border: 1px solid var(--line); border-radius: 6px;
     padding: 0.65rem 0.8rem; width: 100%;
   }
-  input[type="text"]::placeholder { color: var(--muted); }
+  input::placeholder { color: var(--muted); }
   button { font: inherit; cursor: pointer; }
   .add {
     justify-self: start; background: var(--accent); color: var(--on-accent);
     border: 0; border-radius: 6px; padding: 0.55rem 1rem; font-weight: 600;
+  }
+  .buttons, .actions { display: flex; gap: 0.5rem; }
+  .secondary {
+    background: none; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 0.55rem 1rem;
   }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .filters { display: flex; gap: 1.25rem; border-bottom: 1px solid var(--line); margin-bottom: 0.25rem; }
@@ -82,9 +88,22 @@
 <main>
   <header>
     <h1 id="heading">To-do</h1>
-    <button type="button" class="theme" id="theme"></button>
+    <div class="actions">
+      <button type="button" class="theme" id="signout" hidden>Sign out</button>
+      <button type="button" class="theme" id="theme"></button>
+    </div>
   </header>
 
+  <form id="auth-form" hidden>
+    <input type="text" id="username" placeholder="Username" autocomplete="username" maxlength="50" required aria-label="Username">
+    <input type="password" id="password" placeholder="Password (8+ characters)" autocomplete="current-password" maxlength="128" required aria-label="Password">
+    <div class="buttons">
+      <button class="add" type="submit">Sign in</button>
+      <button class="secondary" type="button" id="register">Create account</button>
+    </div>
+  </form>
+
+  <div id="todos-view" hidden>
   <form id="add-form">
     <input type="text" id="title" placeholder="What needs doing?" maxlength="200" required aria-label="Task title">
     <input type="text" id="description" placeholder="Details (optional)" aria-label="Task details">
@@ -99,23 +118,37 @@
 
   <ul id="list"></ul>
   <p class="empty" id="empty" hidden></p>
+  </div>
   <p class="error" id="error" role="alert" hidden></p>
 </main>
 
 <script>
-  const state = { todos: [], filter: "all" };
+  function storedToken() {
+    try { return sessionStorage.getItem("token"); } catch (e) { return null; }
+  }
+  const state = { todos: [], filter: "all", token: storedToken() };
   const $ = (id) => document.getElementById(id);
 
-  async function request(path, options) {
-    const res = await fetch("/todos" + path, {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-    });
+  async function api(url, options = {}) {
+    const headers = { "Content-Type": "application/json" };
+    if (state.token) headers.Authorization = "Bearer " + state.token;
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401 && state.token) {
+      signOut("Your session expired. Sign in again.");
+      const expired = new Error("Session expired");
+      expired.signedOut = true;
+      throw expired;
+    }
     if (!res.ok) {
-      throw new Error(res.status === 422 ? "Enter a title for the task." : "Something went wrong (" + res.status + "). Try again.");
+      const taskTitleIssue = res.status === 422 && url.startsWith("/todos");
+      const err = new Error(taskTitleIssue ? "Enter a title for the task." : "Something went wrong (" + res.status + "). Try again.");
+      err.status = res.status;
+      throw err;
     }
     return res.status === 204 ? null : res.json();
   }
+
+  const request = (path, options) => api("/todos" + path, options);
 
   function showError(message) {
     $("error").textContent = message || "";
@@ -127,12 +160,21 @@
     try {
       await action();
     } catch (err) {
-      showError(err.message);
+      if (!err.signedOut) showError(err.message);
     }
     render();
   }
 
   function render() {
+    const signedIn = Boolean(state.token);
+    $("auth-form").hidden = signedIn;
+    $("todos-view").hidden = !signedIn;
+    $("signout").hidden = !signedIn;
+    if (!signedIn) {
+      $("heading").textContent = "Sign in";
+      return;
+    }
+
     const open = state.todos.filter((t) => !t.completed).length;
     $("heading").textContent = !state.todos.length
       ? "No tasks yet"
@@ -230,7 +272,54 @@
   prefersDark.addEventListener("change", syncThemeButton);
   syncThemeButton();
 
-  run(async () => { state.todos = await request("", { method: "GET" }); });
+  function setToken(token) {
+    state.token = token;
+    try { sessionStorage.setItem("token", token); } catch (e) { /* storage unavailable */ }
+  }
+
+  function signOut(message) {
+    state.token = null;
+    state.todos = [];
+    try { sessionStorage.removeItem("token"); } catch (e) { /* storage unavailable */ }
+    showError(message || "");
+  }
+
+  async function authenticate(mode) {
+    const username = $("username").value.trim();
+    const password = $("password").value;
+    if (!username || !password) return;
+    showError("");
+    try {
+      const body = JSON.stringify({ username, password });
+      if (mode === "register") await api("/auth/register", { method: "POST", body });
+      const data = await api("/auth/login", { method: "POST", body });
+      setToken(data.access_token);
+      $("auth-form").reset();
+      state.todos = await request("", { method: "GET" });
+    } catch (err) {
+      if (!err.signedOut) {
+        showError({
+          401: "Incorrect username or password.",
+          409: "That username is taken.",
+          422: "Use a username of 3+ letters, numbers, or . _ - and a password of 8+ characters.",
+        }[err.status] || err.message);
+      }
+    }
+    render();
+  }
+
+  $("auth-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    authenticate("login");
+  });
+  $("register").addEventListener("click", () => authenticate("register"));
+  $("signout").addEventListener("click", () => { signOut(); render(); });
+
+  if (state.token) {
+    run(async () => { state.todos = await request("", { method: "GET" }); });
+  } else {
+    render();
+  }
 </script>
 </body>
 </html>
